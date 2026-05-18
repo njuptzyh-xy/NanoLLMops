@@ -1,0 +1,65 @@
+.venv/
+__pycache__/
+*.pyc
+
+.pytest_cache/
+.ruff_cache/
+
+artifacts/
+outputs/
+reports/
+logs/
+runs/
+
+*.db
+*.sqlite
+*.sqlite3
+
+*.pt
+*.bin
+*.safetensors
+*.jsonl
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual env
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Data / Model artifacts
+data/raw/
+data/processed/
+checkpoints/
+models/
+outputs/
+runs/
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
