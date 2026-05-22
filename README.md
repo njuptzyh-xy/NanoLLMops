@@ -14,6 +14,14 @@ Near-term focus:
 2. Add lightweight model registry, job management, and metrics collection.
 3. Keep the project readable and educational instead of prematurely over-engineering it.
 
+Current implemented entrypoints:
+
+- `scripts/train_nanogpt.py`: trigger `nanoGPT` training from the NanoLLMOps repo.
+- `scripts/package_nanogpt_model.py`: package `ckpt.pt` and `meta.pkl` into the artifact layout.
+- `scripts/convert_nanogpt_to_nanovllm.py`: write the `converted/` bundle with config/tokenizer metadata and, when dependencies are present, `model.safetensors`.
+- `scripts/infer_nanogpt.py` / `scripts/serve_nanogpt.py`: run the minimal local inference path.
+- `scripts/infer_nanogpt_vllm.py` / `scripts/serve_nanogpt_vllm.py`: run the vLLM-style runtime path.
+
 Reference repositories:
 
 - Training: `/home/zyh-ub/PyRepos/nanoGPT`

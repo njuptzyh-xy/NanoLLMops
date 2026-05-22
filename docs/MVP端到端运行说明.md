@@ -117,11 +117,104 @@ POST /generate -> 200
 - checkpoint/meta 打包
 - 本地推理入口
 - FastAPI 服务入口
+- vLLM-style runtime：
+  - `Sequence`
+  - `BlockManager`
+  - `Scheduler`
+  - `KV Cache`
+  - `Prefill / Decode`
 
 暂未打通：
 
-- `nanoGPT ckpt.pt -> safetensors`
-- HF-compatible `config.json`
-- `nano-vllm` 原生加载与调度
+- 从 `converted/` 目录直接加载并推理
+- `nano-vllm` 原生 `flash-attn/triton` 路径
 
-这些是下一阶段的重点。
+补充：
+
+- 仓库现在已经有 `scripts/convert_nanogpt_to_nanovllm.py`
+- 该脚本会稳定写出 `converted/config.json`、`generation_config.json`、`tokenizer.json`
+- 若当前环境安装了 `torch + safetensors`，还会继续输出 `converted/model.safetensors`
+- 若环境依赖不完整，可先用 `--metadata-only` 生成转换骨架
+- 当前 `nanollmops` 环境已经补齐：
+  - `torch`
+  - `safetensors`
+  - `numpy`
+- 已完成真实 `ckpt.pt -> model.safetensors` 烟测
+- 已新增 `scripts/validate_converted_nanogpt.py`，用于校验转换产物
+
+转换命令：
+
+```bash
+conda run -n nanollmops python scripts/convert_nanogpt_to_nanovllm.py \
+  --checkpoint /home/zyh-ub/PyRepos/nanoGPT/out-shakespeare-char/ckpt.pt \
+  --meta /home/zyh-ub/PyRepos/nanoGPT/data/shakespeare_char/meta.pkl \
+  --model-name shakespeare-char \
+  --version v1
+```
+
+转换后校验：
+
+```bash
+conda run -n nanollmops python scripts/validate_converted_nanogpt.py \
+  --model-dir artifacts/shakespeare-char-v1/converted
+```
+
+当前真实校验结果：
+
+```text
+validated -> artifacts/shakespeare-char-v1/converted
+tensor_count -> 36
+checked_keys -> 36
+```
+
+## 5. vLLM-style demo
+
+离线运行：
+
+```bash
+conda run -n nanoGPT python scripts/infer_nanogpt_vllm.py \
+  --checkpoint artifacts/shakespeare-char-v1/source/ckpt.pt \
+  --meta artifacts/shakespeare-char-v1/source/meta.pkl \
+  --prompt "To be or not to be" \
+  --max-tokens 24 \
+  --device cpu \
+  --dtype float32 \
+  --max-model-len 64 \
+  --kvcache-block-size 16 \
+  --num-kvcache-blocks 64
+```
+
+启动服务：
+
+```bash
+/home/zyh-ub/miniconda3/envs/nanoGPT/bin/python scripts/serve_nanogpt_vllm.py \
+  --checkpoint artifacts/shakespeare-char-v1/source/ckpt.pt \
+  --meta artifacts/shakespeare-char-v1/source/meta.pkl \
+  --host 127.0.0.1 \
+  --port 8013 \
+  --device cpu \
+  --dtype float32 \
+  --max-model-len 64 \
+  --kvcache-block-size 16 \
+  --num-kvcache-blocks 64
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8013/health
+```
+
+生成请求：
+
+```bash
+curl -X POST http://127.0.0.1:8013/generate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt": "To be or not to be",
+    "max_tokens": 24,
+    "temperature": 0.8
+  }'
+```
+
+这些仍然属于下一阶段的重点，但“真实转换”和“转换后自检”已经不再停留在计划阶段。
