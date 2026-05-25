@@ -1,12 +1,18 @@
 # NanoLLMOps
 
-NanoLLMOps is a lightweight train-infer integrated platform built around `nanoGPT` and `nano-vllm`.
+NanoLLMOps is a lightweight train-infer integrated platform built around `nanoGPT` and `nano-vllm`, with the long-term goal of combining the two codebases coherently and iteratively optimizing the full training-to-serving workflow.
 
 Current repository status on 2026-05-18:
 
 - Product scope is defined in `nanoLLMops产品文档.md`.
 - Initial project skeleton is ready for phased implementation.
 - The active planning and execution log lives in `docs/开发规划与实时记录.md`.
+
+Project direction:
+
+1. Keep `nanoGPT` as the main reference for training flow, checkpoint structure, and lightweight GPT experimentation.
+2. Keep `nano-vllm` as the main reference for runtime scheduling, KV-cache management, and high-throughput inference design.
+3. Use NanoLLMOps as the integration layer that gradually connects the two and absorbs validated optimizations back into a clear, reproducible pipeline.
 
 Near-term focus:
 
