@@ -151,7 +151,6 @@ model         -> "shakespeare-char-v1"
 
 暂未打通：
 
-- converted 目录接入 vLLM-style runtime
 - `nano-vllm` 原生 `flash-attn/triton` 路径
 
 补充：
@@ -207,6 +206,29 @@ conda run -n nanoGPT python scripts/infer_nanogpt_vllm.py \
   --max-model-len 64 \
   --kvcache-block-size 16 \
   --num-kvcache-blocks 64
+```
+
+从 converted 目录离线运行：
+
+```bash
+conda run -n nanollmops python scripts/infer_converted_nanogpt_vllm.py \
+  --model-dir artifacts/shakespeare-char-v1/converted \
+  --prompt "To be" \
+  --max-tokens 4 \
+  --device cpu \
+  --dtype float32 \
+  --max-model-len 64 \
+  --kvcache-block-size 16 \
+  --num-kvcache-blocks 64
+```
+
+真实烟测结果：
+
+```text
+input_tokens  -> 5
+output_tokens -> 4
+output        -> "To be you"
+engine        -> "vllm-style-gpt"
 ```
 
 启动服务：

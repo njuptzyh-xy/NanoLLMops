@@ -17,6 +17,9 @@ from nanollmops.converter.convert import (
     build_hf_config,
     convert_state_dict,
 )
+from nanollmops.runtime.config import RuntimeConfig
+from nanollmops.runtime.nanogpt_vllm import VLLMStyleNanoGPT
+from nanollmops.runtime.sampling_params import SamplingParams
 from nanollmops.serving.nanogpt import GPT, GPTConfig, GenerationRequest, NanoGPTDeployment
 
 
@@ -71,11 +74,26 @@ class ConvertedInferenceTest(unittest.TestCase):
             response = deployment.generate(
                 GenerationRequest(prompt="a", max_new_tokens=2, temperature=1.0, top_k=1)
             )
+            engine = VLLMStyleNanoGPT.from_converted(
+                str(model_dir),
+                runtime_config=RuntimeConfig(
+                    max_model_len=8,
+                    kvcache_block_size=2,
+                    num_kvcache_blocks=4,
+                ),
+            )
+            runtime_response = engine.generate(
+                prompt="a",
+                sampling_params=SamplingParams(max_tokens=2, ignore_eos=True),
+            )
 
         self.assertEqual(deployment.model_name, "tiny-v1")
         self.assertEqual(response.input_tokens, 1)
         self.assertEqual(response.output_tokens, 2)
         self.assertEqual(len(response.output), 3)
+        self.assertEqual(runtime_response["model"], "tiny-v1")
+        self.assertEqual(runtime_response["engine"], "vllm-style-gpt")
+        self.assertEqual(runtime_response["output_tokens"], 2)
 
 
 if __name__ == "__main__":

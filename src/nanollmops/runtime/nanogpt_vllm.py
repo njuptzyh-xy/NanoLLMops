@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import pickle
 from dataclasses import dataclass
@@ -26,6 +27,13 @@ class CharTokenizer:
         with open(meta_path, "rb") as handle:
             meta = pickle.load(handle)
         return cls(meta["stoi"], meta["itos"])
+
+    @classmethod
+    def from_tokenizer_json(cls, tokenizer_path: str) -> "CharTokenizer":
+        with open(tokenizer_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        stoi = payload["model"]["vocab"]
+        return cls(stoi, {token_id: token for token, token_id in stoi.items()})
 
     def encode(self, text: str) -> list[int]:
         unknown = [char for char in text if char not in self.stoi]
@@ -209,6 +217,46 @@ class VLLMStyleNanoGPT:
         self.model.load_state_dict(state_dict)
         self.model.eval()
         self.tokenizer = CharTokenizer.from_meta(meta_path)
+        self._initialize_runtime_state()
+        checkpoint_file = Path(checkpoint_path)
+        self.model_name = checkpoint_file.parent.parent.name if checkpoint_file.parent.name == "source" else checkpoint_file.parent.name
+
+    @classmethod
+    def from_converted(
+        cls,
+        model_dir: str,
+        device: str = "cpu",
+        dtype: str = "float32",
+        runtime_config: RuntimeConfig | None = None,
+    ) -> "VLLMStyleNanoGPT":
+        from nanollmops.converter.load import load_converted_nanogpt_state_dict
+
+        config, state_dict = load_converted_nanogpt_state_dict(model_dir, device=device)
+        engine = cls.__new__(cls)
+        engine.checkpoint_path = None
+        engine.meta_path = None
+        engine.device = device
+        engine.dtype = getattr(torch, dtype)
+        engine.runtime_config = runtime_config or RuntimeConfig()
+        engine.model_config = GPTConfig(
+            block_size=int(config["n_positions"]),
+            vocab_size=int(config["vocab_size"]),
+            n_layer=int(config["n_layer"]),
+            n_head=int(config["n_head"]),
+            n_embd=int(config["n_embd"]),
+            dropout=float(config.get("resid_pdrop", 0.0)),
+            bias=bool(config.get("bias", False)),
+            kvcache_block_size=engine.runtime_config.kvcache_block_size,
+        )
+        engine.model = CachedGPTModel(engine.model_config).to(device=device, dtype=engine.dtype)
+        engine.model.load_state_dict(state_dict)
+        engine.model.eval()
+        engine.tokenizer = CharTokenizer.from_tokenizer_json(str(Path(model_dir) / "tokenizer.json"))
+        engine._initialize_runtime_state()
+        engine.model_name = Path(model_dir).resolve().parent.name
+        return engine
+
+    def _initialize_runtime_state(self) -> None:
         self.scheduler = Scheduler(self.runtime_config)
         self.layer_k_caches = [
             torch.zeros(
@@ -216,7 +264,7 @@ class VLLMStyleNanoGPT:
                 self.runtime_config.kvcache_block_size,
                 self.model_config.n_head,
                 self.model_config.n_embd // self.model_config.n_head,
-                device=device,
+                device=self.device,
                 dtype=self.dtype,
             )
             for _ in range(self.model_config.n_layer)
@@ -224,8 +272,6 @@ class VLLMStyleNanoGPT:
         self.layer_v_caches = [
             torch.zeros_like(self.layer_k_caches[layer_id]) for layer_id in range(self.model_config.n_layer)
         ]
-        checkpoint_file = Path(checkpoint_path)
-        self.model_name = checkpoint_file.parent.parent.name if checkpoint_file.parent.name == "source" else checkpoint_file.parent.name
 
     def add_request(self, prompt: str, sampling_params: SamplingParams) -> Sequence:
         token_ids = self.tokenizer.encode(prompt)

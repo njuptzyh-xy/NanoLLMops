@@ -250,12 +250,9 @@ class NanoGPTDeployment:
         device: str = "cpu",
         dtype: str = "float32",
     ) -> "NanoGPTDeployment":
-        from safetensors.torch import load_file
+        from nanollmops.converter.load import load_converted_nanogpt_state_dict
 
-        from nanollmops.converter.validate import load_converted_config, validate_converted_model
-
-        validate_converted_model(model_dir)
-        config = load_converted_config(model_dir)
+        config, state_dict = load_converted_nanogpt_state_dict(model_dir, device=device)
         deployment = cls.__new__(cls)
         deployment.checkpoint_path = None
         deployment.meta_path = None
@@ -272,10 +269,7 @@ class NanoGPTDeployment:
             bias=bool(config.get("bias", False)),
         )
         deployment.model = GPT(deployment.model_config)
-        converted = load_file(str(Path(model_dir) / "model.safetensors"), device=device)
-        deployment.model.load_state_dict(
-            _build_nanogpt_state_dict(converted, deployment.model_config)
-        )
+        deployment.model.load_state_dict(state_dict)
         deployment.model.eval().to(device=device, dtype=deployment.dtype)
         deployment.tokenizer = CharTokenizer.from_tokenizer_json(
             str(Path(model_dir) / "tokenizer.json")
@@ -307,57 +301,3 @@ class NanoGPTDeployment:
             tokens_per_second=round(tps, 3),
             model=self.model_name,
         )
-
-
-def _build_nanogpt_state_dict(
-    converted: dict[str, torch.Tensor],
-    config: GPTConfig,
-) -> dict[str, torch.Tensor]:
-    state_dict = {
-        "transformer.wte.weight": converted["model.embed_tokens.weight"],
-        "transformer.wpe.weight": converted["model.position_embeddings.weight"],
-        "transformer.ln_f.weight": converted["model.norm.weight"],
-        "lm_head.weight": converted["lm_head.weight"],
-    }
-    if config.bias:
-        state_dict["transformer.ln_f.bias"] = converted["model.norm.bias"]
-
-    for layer_id in range(config.n_layer):
-        source = f"model.layers.{layer_id}"
-        target = f"transformer.h.{layer_id}"
-        state_dict[f"{target}.attn.c_attn.weight"] = torch.cat(
-            [
-                converted[f"{source}.self_attn.q_proj.weight"],
-                converted[f"{source}.self_attn.k_proj.weight"],
-                converted[f"{source}.self_attn.v_proj.weight"],
-            ],
-            dim=0,
-        )
-        state_dict[f"{target}.attn.c_proj.weight"] = converted[
-            f"{source}.self_attn.o_proj.weight"
-        ]
-        state_dict[f"{target}.mlp.c_fc.weight"] = converted[f"{source}.mlp.fc_in.weight"]
-        state_dict[f"{target}.mlp.c_proj.weight"] = converted[f"{source}.mlp.fc_out.weight"]
-        state_dict[f"{target}.ln_1.weight"] = converted[f"{source}.input_layernorm.weight"]
-        state_dict[f"{target}.ln_2.weight"] = converted[
-            f"{source}.post_attention_layernorm.weight"
-        ]
-        if config.bias:
-            state_dict[f"{target}.attn.c_attn.bias"] = torch.cat(
-                [
-                    converted[f"{source}.self_attn.q_proj.bias"],
-                    converted[f"{source}.self_attn.k_proj.bias"],
-                    converted[f"{source}.self_attn.v_proj.bias"],
-                ],
-                dim=0,
-            )
-            state_dict[f"{target}.attn.c_proj.bias"] = converted[
-                f"{source}.self_attn.o_proj.bias"
-            ]
-            state_dict[f"{target}.mlp.c_fc.bias"] = converted[f"{source}.mlp.fc_in.bias"]
-            state_dict[f"{target}.mlp.c_proj.bias"] = converted[f"{source}.mlp.fc_out.bias"]
-            state_dict[f"{target}.ln_1.bias"] = converted[f"{source}.input_layernorm.bias"]
-            state_dict[f"{target}.ln_2.bias"] = converted[
-                f"{source}.post_attention_layernorm.bias"
-            ]
-    return state_dict
