@@ -46,6 +46,8 @@ env/
 # Logs
 *.log
 logs/
+!docs/logs/
+!docs/logs/*.md
 
 # Data / Model artifacts
 data/raw/

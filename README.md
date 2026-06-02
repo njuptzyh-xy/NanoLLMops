@@ -2,11 +2,13 @@
 
 NanoLLMOps is a lightweight train-infer integrated platform built around `nanoGPT` and `nano-vllm`, with the long-term goal of combining the two codebases coherently and iteratively optimizing the full training-to-serving workflow.
 
-Current repository status on 2026-05-18:
+Current repository status on 2026-06-02:
 
 - Product scope is defined in `nanoLLMops产品文档.md`.
-- Initial project skeleton is ready for phased implementation.
-- The active planning and execution log lives in `docs/开发规划与实时记录.md`.
+- Phase 1 MVP is complete. Converted artifacts can run through local inference and the CPU vLLM-style runtime.
+- The active task plan lives in `docs/开发规划.md`.
+- Task logs are stored separately in `docs/logs/`.
+- Read `docs/文档索引.md` before starting a new development task.
 
 Project direction:
 
@@ -27,6 +29,8 @@ Current implemented entrypoints:
 - `scripts/convert_nanogpt_to_nanovllm.py`: write the `converted/` bundle with config/tokenizer metadata and, when dependencies are present, `model.safetensors`.
 - `scripts/infer_nanogpt.py` / `scripts/serve_nanogpt.py`: run the minimal local inference path.
 - `scripts/infer_nanogpt_vllm.py` / `scripts/serve_nanogpt_vllm.py`: run the vLLM-style runtime path.
+- `scripts/infer_converted_nanogpt.py`: load and infer directly from a converted artifact.
+- `scripts/infer_converted_nanogpt_vllm.py`: load a converted artifact into the CPU vLLM-style runtime.
 
 Reference repositories:
 
