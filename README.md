@@ -4,11 +4,11 @@ NanoLLMOps is a lightweight train-infer integrated platform built around `nanoGP
 
 Current repository status on 2026-06-02:
 
-- Product scope is defined in `nanoLLMops产品文档.md`.
+- Product scope is defined in `docs/product/PRD.md`.
 - Phase 1 MVP is complete. Converted artifacts can run through local inference and the CPU vLLM-style runtime.
-- The active task plan lives in `docs/开发规划.md`.
-- Task logs are stored separately in `docs/logs/`.
-- Read `docs/文档索引.md` before starting a new development task.
+- The active task plan lives in `docs/planning/tasks.md`.
+- Task specifications and logs are stored under `docs/tasks/`.
+- Read `docs/index.md` before starting a new development task.
 
 Project direction:
 
