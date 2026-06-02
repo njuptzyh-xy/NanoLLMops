@@ -8,7 +8,7 @@
 nanoGPT 训练 -> checkpoint/meta 产物 -> NanoLLMOps artifact 打包 -> 本地推理/服务部署
 ```
 
-当前这条链路先使用本仓库的最小 NanoGPT 推理服务跑通，后续再接入 `nano-vllm`。
+当前这条链路先使用本仓库的最小 NanoGPT 推理服务跑通，已经支持原始 checkpoint 和 `converted/` 目录两种加载方式，后续再接入 `nano-vllm`。
 
 ## 1. 训练
 
@@ -109,12 +109,37 @@ POST /generate -> 200
 }
 ```
 
+## 5. 从 converted 目录直接推理
+
+转换并校验后，可以不再读取 `source/ckpt.pt` 和 `source/meta.pkl`，直接加载 `converted/`：
+
+```bash
+conda run -n nanollmops python scripts/infer_converted_nanogpt.py \
+  --model-dir artifacts/shakespeare-char-v1/converted \
+  --prompt "To be" \
+  --max-new-tokens 4 \
+  --device cpu \
+  --dtype float32
+```
+
+加载过程会先校验 `config.json` 和 `model.safetensors`，再读取 `tokenizer.json` 并重组 NanoGPT fused QKV 权重。
+
+真实烟测结果：
+
+```text
+input_tokens  -> 5
+output_tokens -> 4
+output        -> "To be gon"
+model         -> "shakespeare-char-v1"
+```
+
 ## 当前范围
 
 已打通：
 
 - 训练入口封装
 - checkpoint/meta 打包
+- converted 目录直接加载推理
 - 本地推理入口
 - FastAPI 服务入口
 - vLLM-style runtime：
@@ -126,7 +151,7 @@ POST /generate -> 200
 
 暂未打通：
 
-- 从 `converted/` 目录直接加载并推理
+- converted 目录接入 vLLM-style runtime
 - `nano-vllm` 原生 `flash-attn/triton` 路径
 
 补充：
@@ -167,7 +192,7 @@ tensor_count -> 36
 checked_keys -> 36
 ```
 
-## 5. vLLM-style demo
+## 6. vLLM-style demo
 
 离线运行：
 

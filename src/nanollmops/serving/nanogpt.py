@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import pickle
 from dataclasses import dataclass
@@ -196,6 +197,13 @@ class CharTokenizer:
             meta = pickle.load(handle)
         return cls(meta["stoi"], meta["itos"])
 
+    @classmethod
+    def from_tokenizer_json(cls, tokenizer_path: str) -> "CharTokenizer":
+        with open(tokenizer_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        stoi = payload["model"]["vocab"]
+        return cls(stoi, {token_id: token for token, token_id in stoi.items()})
+
     def encode(self, text: str) -> list[int]:
         unknown = [char for char in text if char not in self.stoi]
         if unknown:
@@ -235,6 +243,45 @@ class NanoGPTDeployment:
         self.model.eval().to(device=device, dtype=self.dtype)
         self.tokenizer = CharTokenizer.from_meta(meta_path)
 
+    @classmethod
+    def from_converted(
+        cls,
+        model_dir: str,
+        device: str = "cpu",
+        dtype: str = "float32",
+    ) -> "NanoGPTDeployment":
+        from safetensors.torch import load_file
+
+        from nanollmops.converter.validate import load_converted_config, validate_converted_model
+
+        validate_converted_model(model_dir)
+        config = load_converted_config(model_dir)
+        deployment = cls.__new__(cls)
+        deployment.checkpoint_path = None
+        deployment.meta_path = None
+        deployment.device = device
+        deployment.dtype = getattr(torch, dtype)
+        deployment.model_name = Path(model_dir).resolve().parent.name
+        deployment.model_config = GPTConfig(
+            block_size=int(config["n_positions"]),
+            vocab_size=int(config["vocab_size"]),
+            n_layer=int(config["n_layer"]),
+            n_head=int(config["n_head"]),
+            n_embd=int(config["n_embd"]),
+            dropout=float(config.get("resid_pdrop", 0.0)),
+            bias=bool(config.get("bias", False)),
+        )
+        deployment.model = GPT(deployment.model_config)
+        converted = load_file(str(Path(model_dir) / "model.safetensors"), device=device)
+        deployment.model.load_state_dict(
+            _build_nanogpt_state_dict(converted, deployment.model_config)
+        )
+        deployment.model.eval().to(device=device, dtype=deployment.dtype)
+        deployment.tokenizer = CharTokenizer.from_tokenizer_json(
+            str(Path(model_dir) / "tokenizer.json")
+        )
+        return deployment
+
     @torch.inference_mode()
     def generate(self, request: GenerationRequest) -> GenerationResponse:
         start = perf_counter()
@@ -260,3 +307,57 @@ class NanoGPTDeployment:
             tokens_per_second=round(tps, 3),
             model=self.model_name,
         )
+
+
+def _build_nanogpt_state_dict(
+    converted: dict[str, torch.Tensor],
+    config: GPTConfig,
+) -> dict[str, torch.Tensor]:
+    state_dict = {
+        "transformer.wte.weight": converted["model.embed_tokens.weight"],
+        "transformer.wpe.weight": converted["model.position_embeddings.weight"],
+        "transformer.ln_f.weight": converted["model.norm.weight"],
+        "lm_head.weight": converted["lm_head.weight"],
+    }
+    if config.bias:
+        state_dict["transformer.ln_f.bias"] = converted["model.norm.bias"]
+
+    for layer_id in range(config.n_layer):
+        source = f"model.layers.{layer_id}"
+        target = f"transformer.h.{layer_id}"
+        state_dict[f"{target}.attn.c_attn.weight"] = torch.cat(
+            [
+                converted[f"{source}.self_attn.q_proj.weight"],
+                converted[f"{source}.self_attn.k_proj.weight"],
+                converted[f"{source}.self_attn.v_proj.weight"],
+            ],
+            dim=0,
+        )
+        state_dict[f"{target}.attn.c_proj.weight"] = converted[
+            f"{source}.self_attn.o_proj.weight"
+        ]
+        state_dict[f"{target}.mlp.c_fc.weight"] = converted[f"{source}.mlp.fc_in.weight"]
+        state_dict[f"{target}.mlp.c_proj.weight"] = converted[f"{source}.mlp.fc_out.weight"]
+        state_dict[f"{target}.ln_1.weight"] = converted[f"{source}.input_layernorm.weight"]
+        state_dict[f"{target}.ln_2.weight"] = converted[
+            f"{source}.post_attention_layernorm.weight"
+        ]
+        if config.bias:
+            state_dict[f"{target}.attn.c_attn.bias"] = torch.cat(
+                [
+                    converted[f"{source}.self_attn.q_proj.bias"],
+                    converted[f"{source}.self_attn.k_proj.bias"],
+                    converted[f"{source}.self_attn.v_proj.bias"],
+                ],
+                dim=0,
+            )
+            state_dict[f"{target}.attn.c_proj.bias"] = converted[
+                f"{source}.self_attn.o_proj.bias"
+            ]
+            state_dict[f"{target}.mlp.c_fc.bias"] = converted[f"{source}.mlp.fc_in.bias"]
+            state_dict[f"{target}.mlp.c_proj.bias"] = converted[f"{source}.mlp.fc_out.bias"]
+            state_dict[f"{target}.ln_1.bias"] = converted[f"{source}.input_layernorm.bias"]
+            state_dict[f"{target}.ln_2.bias"] = converted[
+                f"{source}.post_attention_layernorm.bias"
+            ]
+    return state_dict

@@ -23,9 +23,10 @@ nanoGPT 训练 -> checkpoint/meta 打包 -> 权重转换 -> 产物校验
 - HTTP 服务入口
 - 真实 `ckpt.pt -> converted/model.safetensors` 转换
 - 转换产物完整性校验
+- converted 目录直接加载推理
 - CPU 可运行的 vLLM 风格请求调度与 KV Cache demo
 
-当前进入 `Phase 1 -> Phase 2` 过渡阶段。下一步重点是从 `converted/` 目录直接加载模型并推理。
+当前进入 `Phase 1 -> Phase 2` 过渡阶段。下一步重点是为 runtime 补充独立测试，并让 converted 目录接入 vLLM 风格 runtime。
 
 ## 核心解决思路
 
@@ -46,6 +47,7 @@ nanoGPT 训练 -> checkpoint/meta 打包 -> 权重转换 -> 产物校验
 | 真实权重转换 | `src/nanollmops/converter/convert.py`、`scripts/convert_nanogpt_to_nanovllm.py` |
 | 转换后校验 | `src/nanollmops/converter/validate.py`、`scripts/validate_converted_nanogpt.py` |
 | 原始 checkpoint 推理 | `src/nanollmops/serving/nanogpt.py`、`scripts/infer_nanogpt.py` |
+| converted 目录推理 | `src/nanollmops/serving/nanogpt.py`、`scripts/infer_converted_nanogpt.py` |
 | HTTP 服务 | `src/nanollmops/serving/api.py`、`scripts/serve_nanogpt.py` |
 | vLLM 风格运行链路 | `src/nanollmops/runtime/`、`scripts/infer_nanogpt_vllm.py`、`scripts/serve_nanogpt_vllm.py` |
 
@@ -62,6 +64,7 @@ nanoGPT 训练 -> checkpoint/meta 打包 -> 权重转换 -> 产物校验
 | `tests/test_conversion_planner.py` | checkpoint 解析、tokenizer 识别、转换计划输出 | 已通过 |
 | `tests/test_converter.py` | 权重转换、配置文件输出、共享权重处理 | 已通过 |
 | `tests/test_validate_converter.py` | 转换后权重名称和形状校验、错误提示 | 已通过 |
+| `tests/test_converted_inference.py` | converted 配置、tokenizer、safetensors 加载与文本生成 | 已通过 |
 
 ## 真实验证结果
 
@@ -69,18 +72,18 @@ nanoGPT 训练 -> checkpoint/meta 打包 -> 权重转换 -> 产物校验
 - 已生成 `artifacts/shakespeare-char-v1/converted/model.safetensors`
 - 转换后校验结果：`tensor_count = 36`、`checked_keys = 36`
 - 原始 checkpoint 本地推理成功
+- converted 目录直接推理成功，真实烟测输出 `"To be gon"`
 - vLLM 风格离线推理成功
 - vLLM 风格服务 `GET /health` 和 `POST /generate` 调用成功
 
 ## 当前未完成
 
-- 从 `converted/` 目录直接加载并推理
+- converted 目录接入 vLLM 风格 runtime
 - 正式接入 `nano-vllm` 原生推理路径
 - 为 runtime 调度和 KV Cache block 管理增加独立单元测试
 
 ## 下一阶段目标
 
-1. 实现 converted 模型加载。
-2. 补充 converted 模型推理测试。
-3. 补充 runtime 独立测试。
-4. 在加载链路稳定后继续推进正式推理后端接入。
+1. 补充 runtime 独立测试。
+2. 让 converted 目录接入 vLLM 风格 runtime。
+3. 在加载链路稳定后继续推进正式推理后端接入。
