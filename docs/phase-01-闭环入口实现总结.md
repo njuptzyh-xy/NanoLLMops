@@ -1,275 +1,86 @@
-# Phase 1 总结：闭环入口实现
+# Phase 1 总结：最小训推闭环
 
-更新时间：2026-05-25
+更新时间：2026-06-02
 
 ## 本阶段目标
 
-尽快把训练到推理部署的最小链路从“规划”推进到“可执行入口”。
-
-这一阶段的策略不是先做 `nano-vllm` 深度改造，而是先把最小闭环入口搭起来：
+先用 `nanoGPT` 小模型跑通一条真实、可验证的最小链路：
 
 ```text
-nanoGPT 训练 -> checkpoint/meta 打包 -> 本地推理 -> FastAPI 服务
+nanoGPT 训练 -> checkpoint/meta 打包 -> 权重转换 -> 产物校验
+-> 本地推理 -> vLLM 风格运行 demo -> HTTP 服务
 ```
 
-需要明确的是，这只是 `Phase 1` 的落地策略，不是项目最终方向的收缩。项目一开始的设计目标仍然是基于 `nanoGPT` 与 `nano-vllm` 进行结合，并在统一闭环里持续优化训练产物组织、模型转换、运行时调度与服务部署能力。
+本阶段先解决“链路是否能跑通”。正式接入 `nano-vllm` 推理后端属于下一阶段任务。
 
-## 本阶段完成的内容
+## 当前结论
 
-### 1. 训练入口封装
+`Phase 1` 已完成。仓库已经具备：
 
-新增：
+- 统一训练入口
+- 训练产物打包
+- 原始 checkpoint 本地推理
+- HTTP 服务入口
+- 真实 `ckpt.pt -> converted/model.safetensors` 转换
+- 转换产物完整性校验
+- CPU 可运行的 vLLM 风格请求调度与 KV Cache demo
 
-- `src/nanollmops/train/nanogpt_runner.py`
-- `scripts/train_nanogpt.py`
-- `configs/train_shakespeare_char.py`
+当前进入 `Phase 1 -> Phase 2` 过渡阶段。下一步重点是从 `converted/` 目录直接加载模型并推理。
 
-作用：
+## 核心解决思路
 
-- 通过 NanoLLMOps 统一入口触发 `/home/zyh-ub/PyRepos/nanoGPT/train.py`
-- 保持训练配置仍然兼容 nanoGPT 原生方式
-- 为后面接任务管理和 CLI 提供稳定脚本入口
+1. 先选用 `shakespeare_char` 小模型，降低训练和推理验证成本。
+2. 将原始 `ckpt.pt`、`meta.pkl` 和转换结果放入统一 artifact 目录。
+3. 转换后先检查权重名称和形状，再交给推理后端加载。
+4. 先在本仓库实现简化版 vLLM 风格运行链路，验证调度和 KV Cache 管理逻辑。
+5. 等模型产物加载稳定后，再继续接入正式 `nano-vllm` 后端。
 
-### 2. 训练产物打包
+## 核心代码位置
 
-新增：
+| 能力 | 核心代码或脚本 |
+| --- | --- |
+| 训练入口 | `src/nanollmops/train/nanogpt_runner.py`、`scripts/train_nanogpt.py` |
+| 产物目录和状态描述 | `src/nanollmops/artifacts.py` |
+| 产物打包 | `scripts/package_nanogpt_model.py` |
+| 转换规划 | `src/nanollmops/converter/planner.py`、`scripts/plan_nanogpt_conversion.py` |
+| 真实权重转换 | `src/nanollmops/converter/convert.py`、`scripts/convert_nanogpt_to_nanovllm.py` |
+| 转换后校验 | `src/nanollmops/converter/validate.py`、`scripts/validate_converted_nanogpt.py` |
+| 原始 checkpoint 推理 | `src/nanollmops/serving/nanogpt.py`、`scripts/infer_nanogpt.py` |
+| HTTP 服务 | `src/nanollmops/serving/api.py`、`scripts/serve_nanogpt.py` |
+| vLLM 风格运行链路 | `src/nanollmops/runtime/`、`scripts/infer_nanogpt_vllm.py`、`scripts/serve_nanogpt_vllm.py` |
 
-- `scripts/package_nanogpt_model.py`
+## 关键修复
 
-作用：
+真实转换时发现 `lm_head.weight` 和 `embed_tokens.weight` 共享底层存储，`safetensors` 不能直接保存。
 
-- 接收 `ckpt.pt` 和 `meta.pkl`
-- 生成标准 artifact 目录
-- 输出 manifest、conversion plan 和 Markdown 摘要
-- 将原始 checkpoint/tokenizer 元数据复制到平台目录下
+处理方式：在写盘前复制转换后的 tensor，使每个输出权重拥有独立存储。实现位置：`src/nanollmops/converter/convert.py`。
 
-当前产物布局示例：
+## 测试脚本
 
-```text
-artifacts/shakespeare-char-v1/
-├── artifact_manifest.json
-├── conversion_plan.json
-├── conversion_plan.md
-└── source/
-    ├── ckpt.pt
-    └── meta.pkl
-```
+| 测试脚本 | 覆盖内容 | 结果 |
+| --- | --- | --- |
+| `tests/test_conversion_planner.py` | checkpoint 解析、tokenizer 识别、转换计划输出 | 已通过 |
+| `tests/test_converter.py` | 权重转换、配置文件输出、共享权重处理 | 已通过 |
+| `tests/test_validate_converter.py` | 转换后权重名称和形状校验、错误提示 | 已通过 |
 
-### 3. 最小推理加载与生成
+## 真实验证结果
 
-新增：
+- 使用 `/home/zyh-ub/PyRepos/nanoGPT/out-shakespeare-char/ckpt.pt` 完成真实转换
+- 已生成 `artifacts/shakespeare-char-v1/converted/model.safetensors`
+- 转换后校验结果：`tensor_count = 36`、`checked_keys = 36`
+- 原始 checkpoint 本地推理成功
+- vLLM 风格离线推理成功
+- vLLM 风格服务 `GET /health` 和 `POST /generate` 调用成功
 
-- `src/nanollmops/serving/nanogpt.py`
-- `scripts/infer_nanogpt.py`
+## 当前未完成
 
-作用：
+- 从 `converted/` 目录直接加载并推理
+- 正式接入 `nano-vllm` 原生推理路径
+- 为 runtime 调度和 KV Cache block 管理增加独立单元测试
 
-- 在本仓库内实现最小 GPT 推理模型
-- 直接加载 `nanoGPT` checkpoint
-- 使用 `meta.pkl` 中的 char tokenizer 做 encode/decode
-- 输出生成文本和基础指标：
-  - `latency_ms`
-  - `tokens_per_second`
+## 下一阶段目标
 
-### 4. 最小服务部署
-
-新增：
-
-- `src/nanollmops/serving/api.py`
-- `scripts/serve_nanogpt.py`
-- `scripts/serve_nanogpt_simple.py`
-
-作用：
-
-- 提供 FastAPI 服务入口
-- 暴露 `/health`
-- 暴露 `/generate`
-- 在依赖受限时，提供标准库 HTTP fallback 服务
-
-这让当前项目第一次具备了“部署为服务”的基本形态。
-
-### 5. 端到端运行文档
-
-新增：
-
-- `docs/MVP端到端运行说明.md`
-
-作用：
-
-- 明确训练、打包、推理、启动服务的执行顺序
-- 给后续验证和演示提供固定命令模板
-
-## 本阶段验证结果
-
-已通过的真实验证：
-
-- 成功使用 `nanoGPT` 现有 `ckpt.pt` 进行本地推理
-- 成功生成文本结果
-- 成功将真实 `ckpt.pt` 和 `meta.pkl` 打包进 `artifacts/shakespeare-char-v1/`
-- 成功启动本地 HTTP demo 服务
-- 成功调用 `/health`
-- 成功调用 `/generate`
-
-验证样例说明：
-
-- checkpoint 来源：`/home/zyh-ub/PyRepos/nanoGPT/out-shakespeare-char/ckpt.pt`
-- tokenizer 来源：`/home/zyh-ub/PyRepos/nanoGPT/data/shakespeare_char/meta.pkl`
-
-## 本阶段修复的问题
-
-在真实 checkpoint 打包过程中发现：
-
-- `best_val_loss` 在 checkpoint 中可能是 tensor，而不是纯 Python float
-
-已修复：
-
-- 在 `converter/planner.py` 中增加标量归一化逻辑，保证 manifest/plan 可正确序列化为 JSON
-
-## 当前状态评估
-
-现在仓库已经不再只是“规划 + 转换草案”，而是具备了实际闭环入口：
-
-- 能触发训练
-- 能整理产物
-- 能做本地推理
-- 能启动服务
-
-这已经满足“尽快跑通训练到推理部署流程”的第一阶段要求。
-
-同时也要强调：
-
-- `Phase 1` 先落地最小闭环，是为了给后续 `nano-vllm` 接入和运行时优化提供稳定验证底座
-- 当前仓库中的最小推理链路、转换器和 `vLLM-style runtime` 都属于过渡实现或前置实现
-- 后续阶段仍应持续向“`nanoGPT` 训练侧 + `nano-vllm` 推理侧 + NanoLLMOps 集成层”这一主线收敛
-
-## 仍未完成的关键点
-
-最初缺的三块里，前两块已经补齐：
-
-1. `nanollmops` 环境已补齐 `torch`、`safetensors`、`numpy`
-2. 已实现真实 `ckpt.pt -> converted/config.json + model.safetensors`
-3. `vLLM-style runtime` 也已补到仓库内，但仍不是 `nano-vllm` 原生模型接入
-
-## 新进展：已接入 vLLM 风格核心链路
-
-在后续开发中，已经补上了一条 CPU 可运行的 `vLLM-style` GPT runtime，用于把 `nano-vllm` 的核心思想真正落进当前项目。
-
-新增模块：
-
-- `src/nanollmops/runtime/config.py`
-- `src/nanollmops/runtime/sampling_params.py`
-- `src/nanollmops/runtime/sequence.py`
-- `src/nanollmops/runtime/block_manager.py`
-- `src/nanollmops/runtime/scheduler.py`
-- `src/nanollmops/runtime/nanogpt_vllm.py`
-
-这条 runtime 已经包含：
-
-- `Sequence`
-- `BlockManager`
-- `Scheduler`
-- `KV Cache` block 分配
-- `Prefill / Decode` 分离
-- 基于 prompt/request 的调度推进
-
-这意味着当前 demo 已经不只是“直接调用 `model.generate()`”，而是具备了 `nano-vllm` 风格的核心执行链。
-
-## vLLM-style demo 验证结果
-
-已通过的真实验证新增如下：
-
-- 成功使用 `scripts/infer_nanogpt_vllm.py` 运行离线推理
-- 成功使用 `scripts/serve_nanogpt_vllm.py` 启动本地 HTTP 服务
-- 成功调用 `GET /health`
-- 成功调用 `POST /generate`
-
-健康检查返回：
-
-```json
-{
-  "status": "ok",
-  "model": "shakespeare-char-v1",
-  "engine": "vllm-style-gpt",
-  "kvcache_block_size": 16,
-  "num_kvcache_blocks": 64
-}
-```
-
-生成接口样例返回：
-
-```json
-{
-  "prompt": "To be or not to be",
-  "output": "To be or not to belowing you.\n\nRING EEN LO",
-  "input_tokens": 18,
-  "output_tokens": 24,
-  "latency_ms": 87.651,
-  "tokens_per_second": 273.812,
-  "model": "shakespeare-char-v1",
-  "engine": "vllm-style-gpt",
-  "kvcache_block_size": 16,
-  "num_kvcache_blocks": 64
-}
-```
-
-## 下一步开发重点
-
-下一阶段应直接进入以下内容：
-
-1. 补齐 `nanollmops` 环境中的 `torch/transformers/safetensors`
-2. 编写真正的 `ckpt.pt -> converted/` 转换器
-3. 设计 `NanoGPTForCausalLM` 的 `nano-vllm` 接入实现
-4. 让 `converted/` 产物可以被后续推理后端稳定加载
-
-## 新进展：已补齐真实转换与转换后校验
-
-在最新开发中，Phase 1 里原本最关键的缺口已经补上：项目现在不仅能生成 conversion plan，也能实际输出 converted model bundle。
-
-新增模块与脚本：
-
-- `src/nanollmops/converter/convert.py`
-- `scripts/convert_nanogpt_to_nanovllm.py`
-- `src/nanollmops/converter/validate.py`
-- `scripts/validate_converted_nanogpt.py`
-- `tests/test_converter.py`
-- `tests/test_validate_converter.py`
-
-新增能力：
-
-- 从真实 `nanoGPT ckpt.pt` 输出：
-  - `converted/config.json`
-  - `converted/generation_config.json`
-  - `converted/tokenizer.json`
-  - `converted/tokenizer_config.json`
-  - `converted/special_tokens_map.json`
-  - `converted/model.safetensors`
-- 支持 `--metadata-only` 模式，便于在依赖不完整时先生成骨架
-- 对转换后的权重执行 key/shape 校验，提前发现坏包
-
-真实验证结果：
-
-- 已在 `nanollmops` 环境中安装 `torch 2.12.0`、`safetensors 0.7.0`、`numpy 2.2.6`
-- 已使用真实 checkpoint 成功生成：
-  - `artifacts/shakespeare-char-v1/converted/model.safetensors`
-- 已使用校验脚本验证真实 converted 目录：
-  - `tensor_count = 36`
-  - `checked_keys = 36`
-
-本阶段新增修复：
-
-- `lm_head.weight` 与 `embed_tokens.weight` 在原始 checkpoint 中共享底层存储
-- `safetensors` 默认拒绝直接保存共享存储 tensor
-- 已在转换阶段显式复制输出 tensor，保证写盘稳定
-
-最新阶段结论：
-
-- `Phase 1` 不再只是“闭环入口可执行”
-- 当前已经具备：
-  - 原始训练产物整理
-  - 本地 ckpt 直接推理
-  - `vLLM-style runtime` demo
-  - 真实 converted bundle 输出
-  - converted bundle 自检
-- 因此下一步的技术重心应切换为：
-  - 从 `converted/` 目录加载模型并推理
-  - 将 converted 产物真正接到后续推理后端
+1. 实现 converted 模型加载。
+2. 补充 converted 模型推理测试。
+3. 补充 runtime 独立测试。
+4. 在加载链路稳定后继续推进正式推理后端接入。
