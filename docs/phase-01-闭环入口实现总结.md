@@ -65,6 +65,7 @@ nanoGPT 训练 -> checkpoint/meta 打包 -> 权重转换 -> 产物校验
 | `tests/test_converter.py` | 权重转换、配置文件输出、共享权重处理 | 已通过 |
 | `tests/test_validate_converter.py` | 转换后权重名称和形状校验、错误提示 | 已通过 |
 | `tests/test_converted_inference.py` | converted 配置、tokenizer、safetensors 加载与文本生成 | 已通过 |
+| `tests/test_runtime.py` | Sequence、prefix cache、decode block 扩展、scheduler 资源释放 | 已通过 |
 
 ## 真实验证结果
 
@@ -80,10 +81,9 @@ nanoGPT 训练 -> checkpoint/meta 打包 -> 权重转换 -> 产物校验
 
 - converted 目录接入 vLLM 风格 runtime
 - 正式接入 `nano-vllm` 原生推理路径
-- 为 runtime 调度和 KV Cache block 管理增加独立单元测试
 
 ## 下一阶段目标
 
-1. 补充 runtime 独立测试。
-2. 让 converted 目录接入 vLLM 风格 runtime。
+1. 让 converted 目录接入 vLLM 风格 runtime。
+2. 增加对应推理测试。
 3. 在加载链路稳定后继续推进正式推理后端接入。
